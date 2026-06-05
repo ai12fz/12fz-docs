@@ -1,8 +1,8 @@
-# 12FZ 团队代码开发规范（v1.0）
+# 12FZ 团队代码开发规范（v1.1）
 
 > 适用对象：gong3、高级工程师、服务器技术（写代码的人）
 > 整合自：writing-plans / TDD / subagent-driven-development / requesting-code-review / systematic-debugging / spike / code-review-graph / multi-agent-team-development-workflow
-> 2026-06-05 发布
+> 2026-06-05 发布 | 2026-06-05 v1.1 更新
 
 ---
 
@@ -359,3 +359,33 @@ git diff --cached | grep "^+" | grep -E "(api_key|password|secret|token)\s*=\s*"
 
 > 本规范将定期更新。发现不对的地方随时提意见修改。
 > 下一版目标：加入Go聊天系统开发规范 + PHP规范 + gong3 CRG配置。
+
+---
+
+## 附录：2026-06-05 高级工程师补充推送
+
+当日向高级工程师（202 biancheng）的 `12fz-dev-total-rules` 技能追加了0.2~0.9节补充规则，包括：
+
+| 节 | 内容 |
+|----|------|
+| 0.2 | 补充铁律8条（CRG建图/TDD/开发站优先/版本号/备份/无硬编码/SQL参数化/不跨域） |
+| 0.3 | 自查清单6项+5条审核红线 |
+| 0.4 | 提交格式 `[verified] type: xxx` |
+| 0.5 | 版本号 `vYYYYMMDD-N` + 回退流程 |
+| 0.6 | 错误处理通用规则 |
+| 0.7 | 命名规范（禁止拼音/单字母） |
+| 0.8 | 分支策略 main/dev/feature |
+| 0.9 | 合并执行流程 |
+
+**位置：** `~/.hermes/skills/software-development/12fz-dev-total-rules/SKILL.md`（1210行）
+**推送方式：** SSH远程追加（chaogu-ai → 101跳板 → 202机器）
+**同步状态：** 仅本地文件追加，未入git版本管理。下次管理员执行 `hermes curator pull` 或技能库同步时可能被覆盖。
+
+## 仓库同步
+
+本规范已推送至 GitHub：
+- **Repo:** `ai12fz/12fz-docs`
+- **文件:** `docs/coding-standards.md`
+- **URL:** https://github.com/ai12fz/12fz-docs/blob/main/docs/coding-standards.md
+
+修改本地 `~/.hermes/skills/devops/coding-standards/SKILL.md` 后需同步推送至此仓库。
