@@ -2,7 +2,7 @@
 
 | 仓库 | 说明 | 负责人 | 状态 |
 |------|------|--------|------|
-| 12fz-docs | 开发文档/架构设计/会议记录 | chaogu-ai | ✅ v9.2 |
+| 12fz-docs | 开发文档/架构设计/会议记录/编码规范 | chaogu-ai | ✅ v9.2 |
 | 12fz-sso | 统一用户认证（Go） | gong3 | 🔧 Phase 1 |
 | 12fz-chat | 聊天系统（Go WebSocket） | gong3 | 🔧 Phase 2 |
 | 12fz-ai | AI服务层（Python） | chaogu-ai | 🔧 Phase 2 |
