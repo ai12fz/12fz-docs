@@ -237,8 +237,8 @@ type OAuthProvider interface {
 | 1.4 | 认证网关（邮箱密码 + JWT + OAuth框架） | Go | gong3 | 8 |
 | 1.5 | 企业子账号系统（suzao/kefu 命名体系） | Go | gong3 | 3 |
 | 1.6 | PG数据库部署 + Schema设计（biz/chat/sys） | Shell | 服务器技术 | 3 |
-| 1.7 | CSV数据导入PG（6个文件，316MB） | Python | 高级工程师 | 5 |
-| **Phase 1合计** | | | | **37人天** |
+| 1.7 | CSV数据导入PG（6个文件，316MB，~1070万条） | Python | 高级工程师 | 10 |
+| **Phase 1合计** | | | | **42人天** |
 
 ### Phase 2：聊天系统 + AI助手雏形（第5-8周）
 
