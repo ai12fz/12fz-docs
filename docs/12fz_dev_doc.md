@@ -1,6 +1,6 @@
-# 12FZ 完整项目开发文档 v10.17
+# 12FZ 完整项目开发文档 v10.18
 
-> 最后更新：2026-06-08 | 版本：v10.17
+> 最后更新：2026-06-08 | 版本：v10.18
 
 > 项目：12FZ — 企业中台
      6|
@@ -1597,52 +1597,206 @@ gong3   │ one-api fork + 中台插件       │ U盘打包  │
   1202|3. **热加载** — 中央库更新后，各bot自动加载/卸载技能，不重启
   1203|4. **对接Hermes Agent skill体系** — 中央技能库与Hermes的 skill_manage 机制对接
   1204|
-  1205|### 13.6 中央记忆/中央技能管理规则（老板确认 2026-06-07）
-  1206|
-  1207|**三层记忆架构（老板确认方向）：**
-  1208|
-  1209|```
-  1210|┌────────────────────────────────────────┐
-  1211|│ ① 中央记忆（共享）                      │
-  1212|│   存PG表，API: GET/PUT /api/memory/shared│
-  1213|│   用途：协作流程、不常用特殊知识、决策记录   │
-  1214|├────────────────────────────────────────┤
-  1215|│ ② 本地记忆（个人）                      │
-  1216|│   每台机器 ~/.hermes/MEMORY.md          │
-  1217|│   日常读写不经过网络，最快               │
-  1218|├────────────────────────────────────────┤
-  1219|│ ③ 云端备份（灾备）                      │
-  1220|│   每天一次 本地→云端 单向推送            │
-  1221|│   机器坏了 → 新机拉备份 → 写本地         │
-  1222|│   只灾备，不参与日常读写                  │
-  1223|└────────────────────────────────────────┘
-  1224|```
-  1225|
-  1226|**中央记忆读写权限（老板确认）：**
-  1227|
-  1228|| 操作 | 权限 | 说明 |
-  1229||:---|:---|:-----|
-  1230|| 读取 | ✅ 所有bot不限 | 任意bot可随时查询中央记忆 |
-  1231|| 提交 | ✅ 任意bot可提交申请 | 调API提交pending条目 |
-  1232|| 写入（审核后） | 🔒 仅chaogu-ai | 审核通过后正式写入中央库 |
-  1233|| 维护（整理/清理/归档） | 🔒 仅chaogu-ai | 定期维护中央记忆质量 |
-  1234|
-  1235|**工作流：**
-  1236|
-  1237|```
-  1238|bot A发现需要记一条知识
-  1239|  → 调 API (PUT /api/memory/shared/pending)
-  1240|  → chaogu-ai收到通知 → 审核内容是否符合中央记忆标准
-  1241|  → 通过则正式写入 / 打回说明原因
-  1242|```
-  1243|
-  1244|**中央记忆存什么（低频/共享）：**
-  1245|- 协作流程（发布流程、告警升级、故障处理步骤）
-  1246|- 不常用但必须准确的配置（商户特殊规则、第三方API账号）
-  1247|- 决策记录（过去讨论过的结论）
-  1248|
-  1249|**本地记忆存什么（高频/个人）：**
-  1250|- 聊天风格偏好、用户习惯、当前任务状态
+  ### 13.6 中央记忆系统设计（2026-06-08 完整技术方案）
+
+  **三层记忆架构（老板确认 2026-06-07）：**
+
+  ```
+  ┌──────────────────────────────────────────────────┐
+  │ ① 中央记忆（共享） — PG表 + API                  │
+  │    存 chat schema，API端点按 /api/memory/* 路由    │
+  │    用途：协作流程、不常用特殊知识、决策记录          │
+  │    所有bot共享，写入需审核                          │
+  ├──────────────────────────────────────────────────┤
+  │ ② 本地记忆（个人） — Hermes memory tool           │
+  │    每台机器 ~/.hermes/MEMORY.md + memory tool      │
+  │    日常读写不经过网络，最快                        │
+  │    用途：聊天风格偏好、用户习惯、当前任务状态          │
+  ├──────────────────────────────────────────────────┤
+  │ ③ 云端备份（灾备）                                │
+  │    每天一次 本地→云端 单向推送                     │
+  │    机器坏了 → 新机拉备份 → 写本地                  │
+  │    只灾备，不参与日常读写                          │
+  └──────────────────────────────────────────────────┘
+  ```
+
+  #### 13.6.1 数据库设计（chat schema）
+
+  ```sql
+  -- 中央记忆主表
+  CREATE TABLE central_memory (
+      id            BIGSERIAL PRIMARY KEY,
+      title         VARCHAR(200) NOT NULL,            -- 记忆标题（索引字段）
+      content       TEXT NOT NULL,                     -- 记忆正文
+      category      VARCHAR(50) NOT NULL DEFAULT 'general',
+                                                      -- 分类：协作流程/决策记录/配置/行为规范
+      tags          TEXT[] DEFAULT '{}',               -- 标签数组，支持模糊检索
+      source_bot    VARCHAR(50) NOT NULL,              -- 提交bot名称
+      status        VARCHAR(20) NOT NULL DEFAULT 'pending',
+                                                      -- pending / approved / rejected / archived
+      reviewer      VARCHAR(50),                       -- 审核人（仅chaogu-ai）
+      review_note   TEXT,                              -- 审核备注/打回原因
+      version       INTEGER NOT NULL DEFAULT 1,        -- 版本号，更新时+1
+      created_at    TIMESTAMPTZ DEFAULT NOW(),
+      updated_at    TIMESTAMPTZ DEFAULT NOW(),
+      approved_at   TIMESTAMPTZ                        -- 审核通过时间
+  );
+
+  -- 全文检索索引
+  CREATE INDEX idx_central_memory_category ON central_memory(category);
+  CREATE INDEX idx_central_memory_status ON central_memory(status);
+  CREATE INDEX idx_central_memory_tags ON central_memory USING GIN(tags);
+  CREATE INDEX idx_central_memory_fts ON central_memory USING GIN(to_tsvector('simple', content));
+
+  -- 记忆版本历史（每次更新保留历史版本）
+  CREATE TABLE central_memory_history (
+      id            BIGSERIAL PRIMARY KEY,
+      memory_id     BIGINT NOT NULL REFERENCES central_memory(id) ON DELETE CASCADE,
+      version       INTEGER NOT NULL,
+      title         VARCHAR(200) NOT NULL,
+      content       TEXT NOT NULL,
+      changed_by    VARCHAR(50) NOT NULL,
+      changed_at    TIMESTAMPTZ DEFAULT NOW()
+  );
+
+  -- bot本地记忆状态跟踪（仅在bot启动时加载一次中央记忆到本地memory tool）
+  CREATE TABLE bot_local_memory_sync (
+      bot_name      VARCHAR(50) PRIMARY KEY,
+      last_sync_at  TIMESTAMPTZ,                       -- 上次同步时间
+      last_memory_id BIGINT DEFAULT 0                   -- 已同步到的最新central_memory id
+  );
+  ```
+
+  #### 13.6.2 API接口设计
+
+  所有端点：HTTP POST/GET，JSON body，与聊天系统同域名（chat.12fz.com）
+
+  **`GET /api/memory/search`** — 搜索中央记忆
+
+  ```
+  Query: ?q=关键词&category=协作流程&limit=5
+  Response 200:
+  {
+    "results": [
+      {
+        "id": 1,
+        "title": "发布流程",
+        "content": "发布时间窗口：工作日10:00-16:00...",
+        "category": "协作流程",
+        "tags": ["发布", "部署"],
+        "version": 3,
+        "updated_at": "2026-06-08T12:00:00Z"
+      }
+    ],
+    "total": 1
+  }
+  ```
+
+  **`POST /api/memory/pending`** — 提交记忆申请（所有bot可用）
+
+  ```json
+  // Request
+  {
+    "title": "ERP订单取消规则",
+    "content": "已支付的订单取消需要先联系客服确认，不可直接删除。原因：涉及财务对账。",
+    "category": "行为规范",
+    "tags": ["订单", "取消", "客服"]
+  }
+  // Response 200
+  { "id": 42, "status": "pending", "message": "提交成功，待chaogu-ai审核" }
+  ```
+
+  **`POST /api/memory/review`** — 审核记忆（仅chaogu-ai）
+
+  ```json
+  // Request
+  {
+    "action": "approve",          // approve | reject
+    "id": 42,
+    "note": "内容准确，已审核通过"
+  }
+  // Response 200
+  { "status": "approved" }
+  ```
+
+  **`PUT /api/memory/{id}`** — 更新现有记忆（仅chaogu-ai）
+
+  ```json
+  // Request
+  { "title": "ERP订单取消规则（更新版）", "content": "已更新内容...", "tags": [...] }
+  // Response 200
+  { "id": 42, "version": 2 }
+  ```
+
+  **`GET /api/memory/{id}`** — 获取单条记忆详情（含历史版本）
+
+  **`GET /api/memory/pending`** — chaogu-ai查看待审核列表
+
+  #### 13.6.3 与Hermes Agent集成方式
+
+  每个bot通过Hermes tool（memory tool）以HTTP触发读取中央记忆：
+
+  **启动时：**
+  1. bot启动 → 调 `GET /api/memory/search?limit=20&status=approved&sort=newest`
+  2. 将最新的已审批记忆逐条写入本地 `memory tool`（content="中央记忆：<title>：<content>"）
+  3. 在 `bot_local_memory_sync` 表记录 `last_memory_id`
+
+  **运行时：**
+  1. bot被纠正/学到新知识 → 调 `POST /api/memory/pending` 提交
+  2. chaogu-ai审核 → 通过后所有bot下次启动/手动同步时自动加载
+  3. 无需重启bot，下次会话context注入时携带最新中央记忆
+
+  **chaogu-ai特殊流程（审核角色）：**
+  - 每天检查 `GET /api/memory/pending`
+  - 用内容质量判断标准审核：
+    - ✅ 通过：准确、通用、跨bot有用、不重复
+    - ❌ 打回：过时、特例、描述模糊、已在本地记忆更好
+  - 定期归档过时记忆（status=archived）
+
+  #### 13.6.4 读写权限（老板确认 2026-06-07）
+
+  | 操作 | 权限 | 说明 |
+  |:---|:---|:-----|
+  | 读取 | ✅ 所有bot不限 | 任意bot可随时查询中央记忆 |
+  | 提交 | ✅ 任意bot可提交申请 | 调 `POST /api/memory/pending` 提交 |
+  | 审核/写入 | 🔒 仅chaogu-ai | 审核通过后正式写入中央库 |
+  | 维护/归档 | 🔒 仅chaogu-ai | 定期维护中央记忆质量 |
+
+  #### 13.6.5 记忆内容分类
+
+  | 分类 | 存哪里 | 示例 |
+  |:----|:------|:-----|
+  | 协作流程（发布、升级、告警） | 中央 | "生产发布需先备份→通知群→执行→验证→确认" |
+  | 决策记录 | 中央 | "2026-06-07 老板确认3层记忆架构" |
+  | 行为规范（被纠正的知识） | 中央 | "不要自行同步生产站" |
+  | 商户特殊配置 | 中央 | "商户A的退款规则：7天内无理由" |
+  | 聊天风格偏好 | 本地 | "用户喜欢简洁回复" |
+  | 当前任务状态 | 本地 | "正在开发聊天系统骨架" |
+
+  #### 13.6.6 实施计划（服务器技术负责）
+
+  | 步骤 | 内容 | 预估工时 |
+  |:----|:-----|:--------|
+  | ① | PG建表：`central_memory` + `central_memory_history` + `bot_local_memory_sync` | 0.5天 |
+  | ② | Go后端实现5个API端点（search/pending/review/update/detail） | 1天 |
+  | ③ | bot侧封装HTTP tool：各bot通过memory tool调API读取+提交 | 0.5天 |
+  | ④ | chaogu-ai审核流程：pending列表→审批→归档维护 | 0.5天 |
+  | ⑤ | 云端灾备：cron每天一次 `pg_dump chat.central_memory` → 备份文件 | 0.5天 |
+  | 合计 | | **3天** |
+
+  #### 13.6.7 与中央技能库（13.1-13.5）的关系
+
+  ```
+  中央技能库（Skill Registry）   ← 技能定义 + 触发条件 + 执行逻辑
+         │
+         │ 技能运行时需要上下文知识
+         ▼
+  中央记忆（Central Memory）     ← 共享知识 + 决策记录 + 行为规范
+  ```
+
+  - **技能库 = 怎么做**（流程、工具链、API调用方式）
+  - **中央记忆 = 为什么这么做**（背景、决策过程、经验教训）
+  - 技能集与记忆相互引用：技能描述中可附记忆ID，记忆内容中可标记关联技能
   1251|
 ---
 
@@ -1650,6 +1804,7 @@ gong3   │ one-api fork + 中台插件       │ U盘打包  │
 
 | 版本 | 日期 | 变更摘要 |
 |:----:|:----:|:---------|
+| **v10.18** | **2026-06-08** | **13.6节中央记忆系统扩容为完整技术方案——新增数据库设计（3张表+索引）、API接口设计（5个端点+JSON格式）、Hermes Agent集成方式（启动加载+运行时提交+同步机制）、实施计划（3天，服务器技术负责）、与中央技能库关系说明。** |
 || **v10.17** | **2026-06-08** | **Part 9标题改为AI服务业务。所有shuzao/数造智能中台旧名替换为数造企业中台/旧系统。** |
 || **v10.16** | **2026-06-08** | **域名go.12fz.com定稿。命名确认：数造企业中台。new.12fz.com降为过渡站。** |
 || **v10.15** | **2026-06-08** | **新增9.13节并行开发分工方案。** |
